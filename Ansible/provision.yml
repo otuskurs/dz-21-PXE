@@ -1,0 +1,93 @@
+- hosts: all
+  become: true
+  tasks:
+    - name: Отключаем UFW
+      systemd:
+        name: ufw
+        state: stopped
+        enabled: no
+    - name: Устанавливаем dnsmasq
+      apt:
+        name: dnsmasq
+        update_cache: yes
+        state: present
+
+    - name: Копируем конфиг dnsmasq
+      copy:
+        src: /vagrant/ansible/pxe.conf
+        dest: /etc/dnsmasq.d/pxe.conf
+        owner: root
+        group: root
+        mode: 0644
+        remote_src: true    
+
+    - name: Устанавливаем Apache
+      apt:
+        name: apache2
+        state: present
+
+    - name: Копируем конфиг Apache
+      copy:
+        src: /vagrant/ansible/ks-server.conf
+        dest: /etc/apache2/sites-available/ks-server.conf
+        owner: root
+        group: root
+        mode: 0644
+        remote_src: true 
+
+    - name: Активируем сайт в Apache
+      shell: a2ensite ks-server.conf
+
+    - name: Создаем директории
+      file:
+        path: "{{ item.pth }}"
+        state: directory
+        mode: 0755
+      with_items:
+        - { pth: "/srv/images" }
+        - { pth: "/srv/ks" }
+        - { pth: "/srv/tftp" }
+
+    - name: Скачиваем образ Ubuntu
+      get_url:
+        url: https://releases.ubuntu.com/noble/ubuntu-24.04.1-live-server-amd64.iso 
+        dest: /srv/images/ubuntu-24.04.1-live-server-amd64.iso 
+        force: yes 
+
+    - name: Скачиваем и распаковывает netboot
+      unarchive:
+        src: https://releases.ubuntu.com/noble/ubuntu-24.04.1-netboot-amd64.tar.gz
+        dest: /srv/tftp
+        remote_src: yes
+
+    - name: Копируем конфиги PXE
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dst }}"
+        owner: root
+        group: root
+        mode: 0644
+        remote_src: true
+      with_items:
+        - { src: "/vagrant/ansible/user-data", dst: "/srv/ks/user-data" }
+        - { src: "/vagrant/ansible/default", dst: "/srv/tftp/amd64/pxelinux.cfg/default" }
+    
+    - name: Создаем meta-data файл
+      file:
+        path: /srv/ks/meta-data
+        state: touch
+        owner: root
+        group: root
+        mode: 0644
+    
+    - name: Перезапускаем dnsmasq
+      systemd:
+        name: dnsmasq
+        state: restarted
+        enabled: true
+
+    - name: Перезапускаем Apache
+      systemd:
+        name: apache2
+        state: restarted
+        enabled: true
